@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>도서관 대출</title>
+<style>
+  body { font-family: sans-serif; max-width: 520px; margin: 16px auto; padding: 0 16px; background: #fafafa; color: #222; }
+  h1 { font-size: 22px; }
+  section { background: #fff; border: 1px solid #ddd; border-radius: 10px; padding: 12px; margin: 12px 0; }
+  h2 { font-size: 17px; margin: 0 0 8px; }
+  label { display: block; font-size: 14px; margin-top: 6px; }
+  input, button { font-size: 16px; padding: 8px; width: 100%; box-sizing: border-box; margin-top: 2px; }
+  button { margin-top: 10px; background: #2563eb; color: #fff; border: 0; border-radius: 6px; }
+  button:disabled { background: #999; }
+  .row { display: flex; gap: 8px; } .row > * { flex: 1; }
+  .result { margin-top: 10px; font-size: 26px; font-weight: bold; text-align: center; padding: 8px; border-radius: 6px; }
+  .ok { background: #dcfce7; color: #166534; }
+  .fail { background: #fee2e2; color: #b91c1c; }
+  table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+  th, td { border: 1px solid #ddd; padding: 6px; text-align: center; }
+  .hint { font-size: 13px; color: #666; }
+  #status { color: #555; }
+</style>
+</head>
+<body>
+<h1>도서관 대출 시스템</h1>
+<p id="status">시스템(solution.py) 불러오는 중... 잠시만 기다려 주세요.</p>
+<p class="hint">책: B001 ~ B005 · 날짜는 도서관 문을 연 날부터 "며칠째"(1 이상 정수)</p>
+
+<section>
+  <h2>대출</h2>
+  <div class="row">
+    <label>책 번호<input id="b_book" placeholder="예: B001"></label>
+    <label>며칠째<input id="b_day" inputmode="decimal" placeholder="예: 1"></label>
+  </div>
+  <label>이름<input id="b_name" placeholder="예: 김민수"></label>
+  <button onclick="doBorrow()" disabled>대출하기</button>
+  <div id="b_res"></div>
+</section>
+
+<section>
+  <h2>반납</h2>
+  <div class="row">
+    <label>책 번호<input id="r_book" placeholder="예: B001"></label>
+    <label>며칠째<input id="r_day" inputmode="decimal" placeholder="예: 10"></label>
+  </div>
+  <label>이름<input id="r_name" placeholder="빌린 사람 이름"></label>
+  <button onclick="doReturn()" disabled>반납하기</button>
+  <div id="r_res"></div>
+</section>
+
+<section>
+  <h2>대출 목록</h2>
+  <label>이름<input id="l_name" placeholder="예: 김민수"></label>
+  <button onclick="doLoans()" disabled>대출 목록 보기</button>
+  <div id="l_res"></div>
+</section>
+
+<script src="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js"></script>
+<script>
+const val = id => document.getElementById(id).value;
+let py;
+(async () => {
+  try {
+    py = await loadPyodide();
+    const code = await (await fetch("solution.py?" + Date.now())).text();
+    py.FS.writeFile("solution.py", code);
+    py.runPython(`
+import solution
+lib = solution.LibraryLoan()
+def to_num(s):
+    s = s.strip()
+    try:
+        return int(s)
+    except ValueError:
+        try:
+            return float(s)
+        except ValueError:
+            return s
+`);
+    document.getElementById("status").textContent = "준비 완료";
+    document.querySelectorAll("button").forEach(b => b.disabled = false);
+  } catch (e) {
+    document.getElementById("status").textContent = "불러오기 실패: " + e;
+  }
+})();
+
+function call(expr, args) {
+  for (const [k, v] of Object.entries(args)) py.globals.set(k, v);
+  return py.runPython(expr);
+}
+
+function show(id, ok, text) {
+  const el = document.getElementById(id);
+  el.className = "result " + (ok ? "ok" : "fail");
+  el.textContent = text;
+}
+
+function doBorrow() {
+  const ok = call("lib.borrow(a_book.strip(), a_name, to_num(a_day)) is True",
+    { a_book: val("b_book"), a_name: val("b_name"), a_day: val("b_day") });
+  show("b_res", ok, ok ? "✅ 대출 성공" : "❌ 대출 실패");
+}
+
+function doReturn() {
+  const r = call("lib.return_book(a_book.strip(), a_name, to_num(a_day))",
+    { a_book: val("r_book"), a_name: val("r_name"), a_day: val("r_day") });
+  if (r === -1) show("r_res", false, "❌ 반납 실패");
+  else show("r_res", true, `✅ 반납 성공 · 연체 ${r}일`);
+}
+
+function doLoans() {
+  const rows = call("[list(x) for x in lib.get_loans(a_name)]", { a_name: val("l_name") }).toJs();
+  const esc = s => String(s).replace(/[&<>"']/g, c => "&#" + c.charCodeAt(0) + ";");
+  const el = document.getElementById("l_res");
+  const title = `<p><b>${esc(val("l_name"))}</b> 님의 대출 목록</p>`;
+  if (rows.length === 0) { el.innerHTML = title + "<p>빌린 책 없음</p>"; return; }
+  el.innerHTML = title + "<table><tr><th>책 번호</th><th>반납 기한</th></tr>" +
+    rows.map(([b, due]) => `<tr><td>${esc(b)}</td><td>${due}일째까지</td></tr>`).join("") + "</table>";
+}
+</script>
+</body>
+</html>
